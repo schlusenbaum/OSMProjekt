@@ -19,8 +19,7 @@ from core.cache import (
 from core.config import load_config
 from core.regions import get_children, get_region
 from core.tiles import create_tiles
-from plugins.poi.generate import build_query, generate_poi_gpx, load_poi_config
-from plugins.routes.registry import get_route_plugin, get_route_plugins
+from plugins.registry import get_plugin, get_plugins
 
 
 def load_arguments() -> argparse.Namespace:
@@ -75,7 +74,7 @@ def load_arguments() -> argparse.Namespace:
         help="Routen suchen und erzeugen",
     )
 
-    route_plugins = get_route_plugins()
+    route_plugins = get_plugins()
     route_type_help = "Routentyp: " + ", ".join(
         f"{name} = {module.PLUGIN_DESCRIPTION}"
         for name, module in sorted(route_plugins.items())
@@ -558,6 +557,7 @@ def load_cached_source_tiles(
 
 def build_tile_from_existing_cache(
     target_tile: dict,
+    build_query,
 ) -> dict | None:
     cached_sources = load_cached_source_tiles(
         target_tile
@@ -646,6 +646,7 @@ def query_tile_group(
     tiles: list[dict],
     all_tiles: list[dict],
     force: bool,
+    build_query,
 ) -> tuple[list[dict], list[dict]]:
     if not tiles:
         return [], []
@@ -727,6 +728,7 @@ def query_tile_group(
 def collect_osm_data(
     tiles: list[dict],
     force: bool = False,
+    build_query=None,
 ) -> list[dict]:
     config = load_config()
     all_elements = []
@@ -774,7 +776,10 @@ def collect_osm_data(
 
         if not force:
             reconstructed_data = (
-                build_tile_from_existing_cache(tile)
+                build_tile_from_existing_cache(
+                    tile,
+                    build_query,
+                )
             )
 
             if reconstructed_data is not None:
@@ -850,6 +855,7 @@ def collect_osm_data(
             tiles_to_query,
             tiles,
             force,
+            build_query,
         )
 
         successful_keys = {
@@ -960,156 +966,11 @@ def main() -> None:
         return
 
     if args.command == "route":
-        route_plugin = get_route_plugin(args.type)
-
-        if args.type == "bus":
-            if not args.region:
-                raise ValueError(
-                    "Für route bus muss --region angegeben werden."
-                )
-
-            while True:
-                back_to_region = False
-
-                region = select_region_interactive()
-
-                bbox = (
-                    region["min_lat"],
-                    region["min_lon"],
-                    region["max_lat"],
-                    region["max_lon"],
-                )
-
-                route_items = route_plugin.discover(
-                    bbox,
-                    force=getattr(args, "force", False),
-                )
-
-                route_items.sort(
-                    key=lambda item: item.name.lower(),
-                )
-
-                bus_lines = {
-                    item.id: item
-                    for item in route_items
-                }
-
-                line_refs = list(bus_lines)
-
-                print()
-                print(
-                    f"Gefundene Buslinien: {len(line_refs)}"
-                )
-
-                print()
-                print(
-                    f"{'Nr':>3} | Linie"
-                )
-                print("-" * 50)
-
-                for number, ref in enumerate(line_refs, 1):
-                    route_item = bus_lines[ref]
-                    print(
-                        f"{number:>3} | "
-                        f"{route_item.name:<16} | "
-                        f"{len(route_item.data)} Relation(en)"
-                    )
-
-                while True:
-                    value = input(
-                        "\nAuswahl (z.B. 3 oder 3,7-10, b zurück, q zum Abbrechen): "
-                    ).strip().lower()
-
-                    if value == "q":
-                        print("Auswahl abgebrochen.")
-                        return
-
-                    if value == "b":
-                        print("Zurück zur Regionenauswahl.")
-                        back_to_region = True
-                        break
-
-                    selected_numbers = set()
-
-                    try:
-                        for part in value.split(","):
-                            part = part.strip()
-
-                            if "-" in part:
-                                start_number, end_number = part.split("-", 1)
-                                start_number = int(start_number)
-                                end_number = int(end_number)
-
-                                if start_number > end_number:
-                                    raise ValueError
-
-                                selected_numbers.update(
-                                    range(start_number, end_number + 1)
-                                )
-                            else:
-                                selected_numbers.add(int(part))
-
-                        if not selected_numbers:
-                            raise ValueError
-
-                        if any(
-                            number < 1 or number > len(line_refs)
-                            for number in selected_numbers
-                        ):
-                            raise ValueError
-
-                    except ValueError:
-                        print(
-                            "Ungültige Auswahl. "
-                            "Beispiele: 3 oder 3,7-10"
-                        )
-                        continue
-
-                    selected_refs = [
-                        line_refs[number - 1]
-                        for number in sorted(selected_numbers)
-                    ]
-
-                    print()
-                    print(
-                        f"{len(selected_refs)} Buslinie(n) ausgewählt:"
-                    )
-
-                    for ref in selected_refs:
-                        route_item = bus_lines[ref]
-                        print(
-                            f"  {route_item.name} | "
-                            f"{len(route_item.data)} Relation(en)"
-                        )
-
-                    print()
-                    print("Erzeuge GPX-Dateien...")
-
-                    for ref in selected_refs:
-                        output_files = route_plugin.generate(
-                            bus_lines[ref],
-                            force=getattr(args, "force", False),
-                        )
-
-                        if isinstance(output_files, (list, tuple)):
-                            for output_file in output_files:
-                                print(f"  Erzeugt: {output_file}")
-                        else:
-                            print(f"  Erzeugt: {output_files}")
-
-                    return
-
-                if back_to_region:
-                    continue
-
-        if args.type != "hiking":
-            raise ValueError(
-                f"Unbekannter Routentyp: {args.type}"
-            )
+        route_plugin = get_plugin(args.type)
 
         if not args.region:
             raise ValueError(
-                "Für route hiking muss --region angegeben werden."
+                f"Für route {args.type} muss --region angegeben werden."
             )
 
         while True:
@@ -1124,56 +985,18 @@ def main() -> None:
                 region["max_lon"],
             )
 
-            routes = route_plugin.discover(
+            route_items = route_plugin.discover(
                 bbox,
                 force=getattr(args, "force", False),
             )
 
-            print()
-            print(
-                f"Gefundene Wanderrouten: {len(routes)}"
-            )
-            category_order = {
-                "Fernwanderweg": 0,
-                "Hauptwanderweg": 1,
-                "Regionaler Wanderweg": 2,
-                "Pilgerweg": 3,
-                "Etappe": 4,
-                "Teil-Etappe": 5,
-                "Zuweg": 6,
-                "Lokaler Wanderweg": 7,
-                "Unbekannt": 8,
-            }
+            route_items = route_plugin.sort_items(route_items)
 
-            routes.sort(
-                key=lambda route: (
-                    category_order.get(route.data["category"], 99),
-                    route.name.lower(),
-                )
-            )
-
-            print()
-            print(
-                f"{'Nr':>3} | "
-                f"{'Kategorie':<22} | "
-                f"{'Ref':<16} | "
-                f"{'Länge':<8} | "
-                f"Name"
-            )
-            print("-" * 110)
-
-            for number, route in enumerate(routes, 1):
-                print(
-                    f"{number:>3} | "
-                    f"{route.data['category']:<22} | "
-                    f"{route.data['ref']:<16} | "
-                    f"{route.data['distance']:<8} | "
-                    f"{route.name}"
-                )
+            route_plugin.print_items(route_items)
 
             while True:
                 value = input(
-                    "\nAuswahl (z.B. 33 oder 33,64-67, b zurück, q zum Abbrechen): "
+                    route_plugin.get_selection_prompt()
                 ).strip().lower()
 
                 if value == "q":
@@ -1209,44 +1032,39 @@ def main() -> None:
                         raise ValueError
 
                     if any(
-                        number < 1 or number > len(routes)
+                        number < 1 or number > len(route_items)
                         for number in selected_numbers
                     ):
                         raise ValueError
 
                 except ValueError:
                     print(
-                        "Ungültige Auswahl. "
-                        "Beispiele: 33 oder 33,64-67"
+                        "Ungültige Auswahl. Bitte das vom Plugin angegebene "
+                        "Format verwenden."
                     )
                     continue
 
-                selected_routes = [
-                    routes[number - 1]
+                selected_items = [
+                    route_items[number - 1]
                     for number in sorted(selected_numbers)
                 ]
 
-                print()
-                print(
-                    f"{len(selected_routes)} Route(n) ausgewählt:"
-                )
-
-                for route in selected_routes:
-                    print(
-                        f"  {route.id} | "
-                        f"{route.data['ref']} | "
-                        f"{route.name}"
-                    )
+                route_plugin.print_selected(selected_items)
 
                 print()
                 print("Erzeuge GPX-Dateien...")
 
-                for route in selected_routes:
-                    output_file = route_plugin.generate(
-                        route,
+                for route_item in selected_items:
+                    output_files = route_plugin.generate(
+                        route_item,
                         force=getattr(args, "force", False),
                     )
-                    print(f"  Erzeugt: {output_file}")
+
+                    if isinstance(output_files, (list, tuple)):
+                        for output_file in output_files:
+                            print(f"  Erzeugt: {output_file}")
+                    else:
+                        print(f"  Erzeugt: {output_files}")
 
                 return
 
@@ -1258,18 +1076,95 @@ def main() -> None:
             f"Unbekannter Befehl: {args.command}"
         )
 
+    poi_plugin = get_plugin(args.type)
+    build_query = poi_plugin.build_query
+
     if args.region:
         region = select_region_interactive()
 
-        min_lat = region["min_lat"]
-        min_lon = region["min_lon"]
-        max_lat = region["max_lat"]
-        max_lon = region["max_lon"]
+        bbox = (
+            region["min_lat"],
+            region["min_lon"],
+            region["max_lat"],
+            region["max_lon"],
+        )
 
     else:
-        min_lat, min_lon, max_lat, max_lon = parse_bbox(
-            args.bbox
+        bbox = parse_bbox(args.bbox)
+        region = None
+
+    poi_items = poi_plugin.discover(
+        bbox,
+        force=args.force,
+    )
+    poi_items = poi_plugin.sort_items(poi_items)
+
+    if not poi_items:
+        raise ValueError(
+            "Keine POI-Typen verfügbar."
         )
+
+    poi_plugin.print_items(poi_items)
+
+    while True:
+        value = input(
+            poi_plugin.get_selection_prompt()
+        ).strip().lower()
+
+        if value == "q":
+            print("Auswahl abgebrochen.")
+            return
+
+        if not value:
+            print("Auswahl abgebrochen.")
+            return
+
+        selected_numbers = set()
+
+        try:
+            for part in value.split(","):
+                part = part.strip()
+
+                if "-" in part:
+                    start_number, end_number = part.split("-", 1)
+                    start_number = int(start_number)
+                    end_number = int(end_number)
+
+                    if start_number > end_number:
+                        raise ValueError
+
+                    selected_numbers.update(
+                        range(start_number, end_number + 1)
+                    )
+                else:
+                    selected_numbers.add(int(part))
+
+            if not selected_numbers:
+                raise ValueError
+
+            if any(
+                number < 1 or number > len(poi_items)
+                for number in selected_numbers
+            ):
+                raise ValueError
+
+        except ValueError:
+            print(
+                "Ungültige Auswahl. Bitte das vom Plugin angegebene "
+                "Format verwenden."
+            )
+            continue
+
+        selected_items = [
+            poi_items[number - 1]
+            for number in sorted(selected_numbers)
+        ]
+
+        break
+
+    poi_plugin.print_selected(selected_items)
+
+    min_lat, min_lon, max_lat, max_lon = bbox
 
     tiles = create_tiles(
         min_lat,
@@ -1285,6 +1180,7 @@ def main() -> None:
     elements = collect_osm_data(
         tiles,
         force=args.force,
+        build_query=build_query,
     )
 
     print(
@@ -1292,40 +1188,20 @@ def main() -> None:
         "OSM-Objekte aus Cache/Overpass."
     )
 
-    poi_types = [
-        poi_type.strip()
-        for poi_type in args.type.split(",")
-        if poi_type.strip()
-    ]
+    region_name = (
+        region["name"]
+        if region is not None
+        else None
+    )
 
-    if not poi_types:
-        raise ValueError(
-            "Mindestens ein POI-Typ muss angegeben werden."
-        )
+    output_files = poi_plugin.generate(
+        selected_items,
+        elements,
+        region_name=region_name,
+    )
 
-    region_name = None
-
-    if args.region:
-        region_name = region["name"]
-
-    poi_config = load_poi_config()
-    poi_type_configs = poi_config["poi_types"]
-
-    for poi_type in poi_types:
-        poi_name = poi_type_configs[poi_type]["name"]
-
-        if region_name:
-            output_name = (
-                f"{poi_name}_{region_name}.gpx"
-            )
-        else:
-            output_name = f"{poi_name}.gpx"
-
-        generate_poi_gpx(
-            elements,
-            poi_type,
-            output_name,
-        )
+    for output_file in output_files:
+        print(f"  Erzeugt: {output_file}")
 
 
 if __name__ == "__main__":

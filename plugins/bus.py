@@ -11,7 +11,7 @@ from core.overpass import query_overpass_retry
 PLUGIN_NAME = "bus"
 PLUGIN_DESCRIPTION = "Buslinien"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 BUS_CACHE = PROJECT_ROOT / "cache" / "transit"
 GPX_OUTPUT = PROJECT_ROOT / "output" / "gpx" / "routes" / "bus"
@@ -708,7 +708,44 @@ def discover(bbox, force=False):
 def generate(route_item, force=False):
     """RouteItem über die bestehende Bus-GPX-Erzeugung verarbeiten."""
     return generate_bus_gpx(
-        route_item.id,
+        route_item.name,
         route_item.data,
         force=force,
     )
+
+
+def sort_items(items):
+    return sorted(
+        items,
+        key=lambda item: item.name.lower(),
+    )
+
+
+def print_items(items):
+    print()
+    print(f"Gefundene Buslinien: {len(items)}")
+    print()
+    print(f"{"Nr":>3} | Linie")
+    print("-" * 50)
+
+    for number, item in enumerate(items, 1):
+        print(
+            f"{number:>3} | "
+            f"{item.name:<16} | "
+            f"{len(item.data)} Relation(en)"
+        )
+
+
+def print_selected(items):
+    print()
+    print(f"{len(items)} Buslinie(n) ausgewählt:")
+
+    for item in items:
+        print(
+            f"  {item.name} | "
+            f"{len(item.data)} Relation(en)"
+        )
+
+
+def get_selection_prompt():
+    return "\nAuswahl (z.B. 3 oder 3,7-10, b zurück, q zum Abbrechen): "

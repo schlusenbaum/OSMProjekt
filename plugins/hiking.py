@@ -6,7 +6,7 @@ from pathlib import Path
 PLUGIN_NAME = "hiking"
 PLUGIN_DESCRIPTION = "Wanderrouten"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.config import load_config
@@ -2341,3 +2341,62 @@ def generate_hiking_gpx(relation_id: int) -> Path:
     return output_file
 
 
+def sort_items(items):
+    category_order = {
+        "Fernwanderweg": 0,
+        "Hauptwanderweg": 1,
+        "Regionaler Wanderweg": 2,
+        "Pilgerweg": 3,
+        "Etappe": 4,
+        "Teil-Etappe": 5,
+        "Zuweg": 6,
+        "Lokaler Wanderweg": 7,
+        "Unbekannt": 8,
+    }
+
+    return sorted(
+        items,
+        key=lambda item: (
+            category_order.get(item.data["category"], 99),
+            item.name.lower(),
+        ),
+    )
+
+
+def print_items(items):
+    print()
+    print(f"Gefundene Wanderrouten: {len(items)}")
+    print()
+    print(
+        f"{"Nr":>3} | "
+        f"{"Kategorie":<22} | "
+        f"{"Ref":<16} | "
+        f"{"Länge":<8} | "
+        f"Name"
+    )
+    print("-" * 110)
+
+    for number, item in enumerate(items, 1):
+        print(
+            f"{number:>3} | "
+            f"{item.data["category"]:<22} | "
+            f"{item.data["ref"]:<16} | "
+            f"{item.data["distance"]:<8} | "
+            f"{item.name}"
+        )
+
+
+def print_selected(items):
+    print()
+    print(f"{len(items)} Route(n) ausgewählt:")
+
+    for item in items:
+        print(
+            f"  {item.id} | "
+            f"{item.data["ref"]} | "
+            f"{item.name}"
+        )
+
+
+def get_selection_prompt():
+    return "\nAuswahl (z.B. 33 oder 33,64-67, b zurück, q zum Abbrechen): "

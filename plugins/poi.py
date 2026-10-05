@@ -147,3 +147,92 @@ def generate_poi_gpx(
     )
 
     return output_file
+
+# ---------------------------------------------------------------------------
+# Plugin-Schnittstelle
+# ---------------------------------------------------------------------------
+
+PLUGIN_DESCRIPTION = "POIs"
+
+
+def discover(bbox: tuple[float, float, float, float], force: bool = False):
+    """Liefert die für die Region verfügbaren POI-Typen."""
+    config = load_poi_config()
+    return list(config["poi_types"].keys())
+
+
+def sort_items(items: list[str]) -> list[str]:
+    """Sortiert die POI-Typen für die Anzeige."""
+    config = load_poi_config()
+    poi_types = config["poi_types"]
+
+    return sorted(
+        items,
+        key=lambda poi_type: poi_types[poi_type]["name"].lower(),
+    )
+
+
+def print_items(items: list[str]) -> None:
+    """Zeigt die verfügbaren POI-Typen an."""
+    config = load_poi_config()
+    poi_types = config["poi_types"]
+
+    print()
+    print("Verfügbare POIs:")
+
+    for number, poi_type in enumerate(items, start=1):
+        print(
+            f"  {number}. "
+            f"{poi_types[poi_type]['name']}"
+        )
+
+
+def get_selection_prompt() -> str:
+    """Liefert das Auswahlformat für die POI-Auswahl."""
+    return "POIs auswählen (z. B. 1,3-5, Enter zum Abbrechen): "
+
+
+def print_selected(items: list[str]) -> None:
+    """Zeigt die ausgewählten POI-Typen an."""
+    config = load_poi_config()
+    poi_types = config["poi_types"]
+
+    print()
+    print("Ausgewählte POIs:")
+
+    for poi_type in items:
+        print(
+            f"  {poi_types[poi_type]['name']}"
+        )
+
+
+def generate(
+    items: list[str],
+    elements: list[dict],
+    region_name: str | None = None,
+) -> list[Path]:
+    """Erzeugt die GPX-Dateien für die ausgewählten POI-Typen."""
+    config = load_poi_config()
+    poi_types = config["poi_types"]
+    output_files = []
+
+    for poi_type in items:
+        poi_name = poi_types[poi_type]["name"]
+
+        if region_name:
+            output_name = (
+                f"{poi_name}_{region_name}.gpx"
+            )
+        else:
+            output_name = f"{poi_name}.gpx"
+
+        output_file = generate_poi_gpx(
+            elements,
+            poi_type,
+            output_name,
+        )
+
+        if output_file is not None:
+            output_files.append(output_file)
+
+    return output_files
