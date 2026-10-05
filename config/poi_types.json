@@ -1,0 +1,27 @@
+{
+  "poi_types": {
+    "bus_stops": {
+      "name": "Bushaltestellen",
+      "query": [
+        {
+          "highway": "bus_stop"
+        },
+        {
+          "public_transport": "platform",
+          "bus": "yes"
+        }
+      ],
+      "icon": "Ground Transportation"
+    },
+    "hiking_parking": {
+      "name": "Wanderparkplätze",
+      "query": [
+        {
+          "amenity": "parking",
+          "hiking": "yes"
+        }
+      ],
+      "icon": "Parking Area"
+    }
+  }
+}

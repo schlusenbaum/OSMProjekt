@@ -1,0 +1,10 @@
+cache/
+output/
+__pycache__/
+*.pyc
+*.bak_*
+*.backup
+*.before_cleanup
+.DS_Store
+*.txt
+*.before_*
