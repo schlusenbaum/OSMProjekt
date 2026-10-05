@@ -98,6 +98,7 @@ def query_overpass_retry(
 def query_overpass_adaptive(
     areas: list[dict],
     build_query,
+    success_callback=None,
 ) -> tuple[list[tuple[list[dict], dict]], list[dict]]:
     """
     Führt Overpass-Abfragen adaptiv aus.
@@ -220,6 +221,9 @@ def query_overpass_adaptive(
         try:
             data = query_overpass(query)
 
+            if success_callback is not None:
+                success_callback(group, data)
+
             return [
                 (group, data),
             ], []
@@ -244,6 +248,9 @@ def query_overpass_adaptive(
                     try:
                         data = query_overpass(query)
 
+                        if success_callback is not None:
+                            success_callback(group, data)
+
                         return [
                             (group, data),
                         ], []
@@ -265,6 +272,12 @@ def query_overpass_adaptive(
                     return [], group
 
             first_group, second_group = split_group(group)
+
+            print(
+                f"  Overpass-Gruppe mit {len(group)} Kacheln fehlgeschlagen. "
+                f"Teile Bereich auf: "
+                f"{len(group)} → {len(first_group)} + {len(second_group)} Kacheln."
+            )
 
             successful_first, failed_first = query_group(
                 first_group

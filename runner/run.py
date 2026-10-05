@@ -673,14 +673,12 @@ def query_tile_group(
 
     config = load_config()
 
-    successful_groups, failed_tiles = query_overpass_adaptive(
-        tiles,
-        build_group_query,
-    )
-
     successful_tiles = []
 
-    for group, data in successful_groups:
+    def handle_successful_group(
+        group: list[dict],
+        data: dict,
+    ) -> None:
         elements = data.get("elements", [])
 
         print(
@@ -722,6 +720,12 @@ def query_tile_group(
             )
 
             successful_tiles.append(tile)
+
+    successful_groups, failed_tiles = query_overpass_adaptive(
+        tiles,
+        build_group_query,
+        success_callback=handle_successful_group,
+    )
 
     return successful_tiles, failed_tiles
 
