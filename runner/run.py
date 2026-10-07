@@ -17,7 +17,7 @@ from core.cache import (
     save_cache,
 )
 from core.config import load_config
-from core.regions import get_children, get_region
+from core.regions import find_regions, get_children
 from core.tiles import create_tiles
 from plugins.registry import get_plugin, get_plugins
 
@@ -34,7 +34,22 @@ def load_arguments() -> argparse.Namespace:
 
     regions_parser = subparsers.add_parser(
         "regions",
-        help="Region auswählen",
+        help="Regionen verwalten",
+    )
+
+    regions_subparsers = regions_parser.add_subparsers(
+        dest="regions_action",
+    )
+
+    regions_import_parser = regions_subparsers.add_parser(
+        "import",
+        help="Regionen eines Landes importieren",
+    )
+
+    regions_import_parser.add_argument(
+        "--country",
+        required=False,
+        help="Kommagetrennte ISO-Ländercodes, z. B. AT,CH,IT",
     )
 
     poi_parser = subparsers.add_parser(
@@ -97,12 +112,48 @@ def load_arguments() -> argparse.Namespace:
 
 
 def select_region_interactive() -> dict:
-    current_region = get_region(1)
+    countries = find_regions(region_type="country")
 
-    if current_region is None:
+    if not countries:
         raise RuntimeError(
-            "Deutschland wurde in der Regionsdatenbank nicht gefunden."
+            "Keine Länder in der Regionsdatenbank gefunden."
         )
+
+    if len(countries) == 1:
+        current_region = countries[0]
+    else:
+        print()
+        print("Länder:")
+
+        for number, country in enumerate(countries, start=1):
+            print(
+                f"  {number}. {country['name']}"
+            )
+
+        while True:
+            value = input("Land auswählen (oder q zum Beenden): ").strip().lower()
+
+            if value == "q":
+                print("Auswahl abgebrochen.")
+                raise SystemExit(0)
+
+            try:
+                selection = int(value)
+            except ValueError:
+                print(
+                    "Bitte eine Nummer eingeben "
+                    "oder q zum Abbrechen."
+                )
+                continue
+
+            if 1 <= selection <= len(countries):
+                current_region = countries[selection - 1]
+                break
+
+            print(
+                f"Bitte eine Nummer zwischen 1 und {len(countries)} "
+                "eingeben oder 'q' zum Abbrechen."
+            )
 
     region_history = []
 
@@ -965,7 +1016,77 @@ def collect_osm_data(
 def main() -> None:
     args = load_arguments()
 
+    regions_plugin = get_plugin("regions")
+    regions_plugin.initialize()
+
     if args.command == "regions":
+        if args.regions_action == "import":
+            if args.country:
+                countries = [
+                    country.strip().upper()
+                    for country in args.country.split(",")
+                    if country.strip()
+                ]
+            else:
+                import sqlite3
+
+                db_path = Path("/Users/christianrichter/OSMProjekt/regions/regions.db")
+
+                with sqlite3.connect(db_path) as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT DISTINCT country_code, country_name
+                        FROM admin_level_definitions
+                        WHERE relevant = 1
+                        ORDER BY country_name
+                        """
+                    ).fetchall()
+
+                if not rows:
+                    raise RuntimeError(
+                        "Keine relevanten Länder in admin_level_definitions gefunden."
+                    )
+
+                print()
+                print("Verfügbare Länder:")
+                print()
+
+                for number, (country_code, country_name) in enumerate(rows, start=1):
+                    print(f"  {number:2}: {country_name} ({country_code})")
+
+                print()
+                selection = input(
+                    "Länder auswählen (z. B. 1,3,5 oder q zum Beenden): "
+                ).strip()
+
+                if selection.lower() == "q":
+                    print("Auswahl abgebrochen.")
+                    return
+
+                selected_numbers = [
+                    int(value.strip())
+                    for value in selection.split(",")
+                    if value.strip()
+                ]
+
+                countries = [
+                    rows[number - 1][0].upper()
+                    for number in selected_numbers
+                    if 1 <= number <= len(rows)
+                ]
+
+                if not countries:
+                    print("Keine Länder ausgewählt.")
+                    return
+
+            for country in countries:
+                regions_plugin.run(
+                    "import",
+                    country,
+                )
+
+            return
+
         select_region_interactive()
         return
 

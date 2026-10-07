@@ -188,12 +188,88 @@ def query_overpass_regions(
     )
 
 
+def ensure_schema() -> None:
+    """Stellt sicher, dass die Regionsdatenbank vollständig initialisiert ist."""
+    with get_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS regions (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                parent_id INTEGER,
+                osm_type TEXT,
+                osm_id INTEGER,
+                min_lat REAL,
+                min_lon REAL,
+                max_lat REAL,
+                max_lon REAL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (parent_id) REFERENCES regions(id)
+            )
+            """
+        )
+
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regions_name "
+            "ON regions(name)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regions_osm "
+            "ON regions(osm_type, osm_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regions_parent "
+            "ON regions(parent_id)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regions_type "
+            "ON regions(type)"
+        )
+
+
 def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(REGIONS_DB)
     connection.execute(
         "PRAGMA foreign_keys = ON"
     )
     return connection
+
+
+def get_relevant_admin_levels(country_code: str) -> list[int]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT admin_level
+            FROM admin_level_definitions
+            WHERE country_code = ?
+              AND relevant = 1
+            ORDER BY admin_level
+            """,
+            (country_code.upper(),),
+        ).fetchall()
+
+    return [row[0] for row in rows]
+
+
+def get_next_relevant_admin_level(
+    country_code: str,
+    current_admin_level: int,
+) -> int | None:
+    levels = get_relevant_admin_levels(country_code)
+
+    for level in levels:
+        if level > current_admin_level:
+            return level
+
+    return None
+
+
+def get_region_type(admin_level: int) -> str:
+    if admin_level == 2:
+        return "country"
+
+    return f"admin_level_{admin_level}"
 
 
 def clear_regions() -> None:
@@ -258,13 +334,13 @@ def find_relation(
     return None
 
 
-def build_country_query() -> str:
-    return """
+def build_country_query(country_code: str) -> str:
+    return f"""
 [out:json][timeout:60];
 relation
     ["boundary"="administrative"]
     ["admin_level"="2"]
-    ["ISO3166-1"="DE"];
+    ["ISO3166-1"="{country_code}"];
 out tags center bb;
 """
 
@@ -272,10 +348,11 @@ out tags center bb;
 def build_children_query(
     parent_osm_id: int,
     admin_level: int,
+    country_code: str,
 ) -> str:
     country_filter = ""
     if admin_level == 4:
-        country_filter = '["ISO3166-2"~"^DE-"]'
+        country_filter = f'["ISO3166-2"~"^{country_code}-"]'
 
     return f"""
 [out:json][timeout:60];
@@ -289,36 +366,69 @@ out tags center bb;
 """
 
 
-def import_germany() -> None:
-    print("Suche Deutschland ...")
+def get_next_admin_level(elements: list[dict]) -> int | None:
+    """Ermittelt die niedrigste vorhandene admin_level einer Ergebnismenge."""
+    levels = []
+
+    for element in elements:
+        tags = element.get("tags", {})
+        value = tags.get("admin_level")
+
+        if value is None:
+            continue
+
+        try:
+            levels.append(int(value))
+        except (TypeError, ValueError):
+            continue
+
+    if not levels:
+        return None
+
+    return min(levels)
+
+
+def build_descendants_query(parent_osm_id: int) -> str:
+    """Ermittelt alle administrativen Regionen innerhalb einer Elternregion."""
+    return f"""
+[out:json][timeout:120];
+relation({parent_osm_id});
+map_to_area->.parent;
+relation(area.parent)
+    ["boundary"="administrative"];
+out tags center bb;
+"""
+
+
+def import_country(country_code: str) -> None:
+    print(f"Suche Land {country_code.upper()} ...")
 
     country_data = query_overpass_regions(
-        build_country_query(),
-        "germany",
+        build_country_query(country_code),
+        f"country_{country_code.lower()}",
     )
 
     countries = country_data.get("elements", [])
 
-    germany = next(
+    country = next(
         (
             element
             for element in countries
-            if element.get("tags", {}).get("ISO3166-1") == "DE"
+            if element.get("tags", {}).get("ISO3166-1") == country_code.upper()
         ),
         None,
     )
 
-    if germany is None:
+    if country is None:
         raise RuntimeError(
-            "Deutschland wurde nicht gefunden."
+            f"Land mit ISO-Code {country_code.upper()} wurde nicht gefunden."
         )
 
-    germany_tags = germany.get("tags", {})
+    country_tags = country.get("tags", {})
 
     print(
-        f"Deutschland gefunden: "
-        f"{germany_tags.get('name')} "
-        f"(OSM {germany['id']})"
+        f"{country_tags.get('name', country_code.upper())} gefunden: "
+        f"(OSM {country['id']})"
     )
 
     with get_connection() as connection:
@@ -328,33 +438,48 @@ def import_germany() -> None:
             FROM regions
             WHERE osm_type = ? AND osm_id = ?
             """,
-            ("relation", germany["id"]),
+            ("relation", country["id"]),
         ).fetchone()
 
         if existing:
-            germany_id = existing[0]
+            country_id = existing[0]
         else:
-            germany_id = insert_region(
+            country_id = insert_region(
                 connection,
-                germany_tags.get("name", "Deutschland"),
+                country_tags.get("name", country_code.upper()),
                 "country",
                 None,
                 "relation",
-                germany["id"],
+                country["id"],
             )
             connection.commit()
 
+    admin_levels = get_relevant_admin_levels(country_code)
+
+    if not admin_levels:
+        raise RuntimeError(
+            f"Keine relevanten admin_level für {country_code.upper()} gefunden."
+        )
+
+    first_admin_level = admin_levels[0]
+
+    print(
+        f"Starte Import mit admin_level={first_admin_level}"
+    )
+
     import_children(
-        germany["id"],
-        germany_id,
-        4,
-        "state",
+        country["id"],
+        country_id,
+        first_admin_level,
+        get_region_type(first_admin_level),
+        country_code=country_code,
     )
 
 
 def import_state_regions(
     state_osm_id: int,
     state_db_id: int,
+    country_code: str = "DE",
 ) -> None:
     query = f"""
 [out:json][timeout:120];
@@ -557,14 +682,23 @@ def import_children(
     region_type: str,
     parent_number: int | None = None,
     parent_total: int | None = None,
+    country_code: str = "DE",
 ) -> None:
-    data = query_overpass_regions(
-        build_children_query(
-            parent_osm_id,
-            admin_level,
-        ),
-        f"admin_{parent_osm_id}_{admin_level}",
-    )
+    try:
+        data = query_overpass_regions(
+            build_children_query(
+                parent_osm_id,
+                admin_level,
+                country_code,
+            ),
+            f"admin_{parent_osm_id}_{admin_level}",
+        )
+    except RuntimeError as error:
+        print(
+            f"  Überspringe admin_level={admin_level} "
+            f"für OSM {parent_osm_id}: {error}"
+        )
+        return
 
     elements = data.get("elements", [])
 
@@ -648,21 +782,42 @@ def import_children(
                     f"    Gespeichert: {name}"
                 )
 
-        if admin_level == 4:
+        next_admin_level = get_next_relevant_admin_level(
+            country_code,
+            admin_level,
+        )
+
+        if next_admin_level is not None:
             print(
-                f"    Lade Kreise und Gemeinden für {name} ..."
+                f"    Lade nächste Ebene "
+                f"admin_level={next_admin_level} für {name} ..."
             )
-            import_state_regions(
-                element["id"],
-                db_id,
-            )
-        elif admin_level == 6:
-            print(
-                f"    Lade Gemeinden für {name} ..."
-            )
+
             import_children(
                 element["id"],
                 db_id,
-                8,
-                "municipality",
+                next_admin_level,
+                get_region_type(next_admin_level),
+                parent_number=number,
+                parent_total=len(elements),
+                country_code=country_code,
             )
+        else:
+            next_admin_level = get_next_relevant_admin_level(
+                country_code,
+                admin_level,
+            )
+
+            if next_admin_level is not None:
+                print(
+                    f"    Lade nächste Ebene "
+                    f"admin_level={next_admin_level} für {name} ..."
+                )
+
+                import_children(
+                    element["id"],
+                    db_id,
+                    next_admin_level,
+                    get_region_type(next_admin_level),
+                    country_code=country_code,
+                )
