@@ -12,40 +12,74 @@ def query_overpass(query: str) -> dict:
     servers = config["overpass"]["servers"]
     timeout = config["overpass"]["request_timeout"]
 
+    def request_server(server: str) -> dict:
+        data = urllib.parse.urlencode(
+            {"data": query}
+        ).encode("utf-8")
+
+        request = urllib.request.Request(
+            server,
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "OSMProjekt/1.0",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
+            response_data = response.read().decode("utf-8")
+
+        return json.loads(response_data)
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     last_error = None
 
-    for server in servers:
-        try:
-            data = urllib.parse.urlencode(
-                {"data": query}
-            ).encode("utf-8")
+    print(
+        f"  Overpass: Anfrage parallel an {len(servers)} Server gestartet."
+    )
 
-            request = urllib.request.Request(
-                server,
-                data=data,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "OSMProjekt/1.0",
-                },
-                method="POST",
-            )
+    executor = ThreadPoolExecutor(max_workers=len(servers))
 
-            with urllib.request.urlopen(
-                request,
-                timeout=timeout,
-            ) as response:
-                response_data = response.read().decode("utf-8")
+    futures = {
+        executor.submit(request_server, server): server
+        for server in servers
+    }
 
-            return json.loads(response_data)
+    try:
+        for future in as_completed(futures):
+            server = futures[future]
 
-        except (
-            urllib.error.URLError,
-            urllib.error.HTTPError,
-            TimeoutError,
-            json.JSONDecodeError,
-        ) as error:
-            last_error = error
-            continue
+            try:
+                result = future.result()
+                print(
+                    f"  Overpass: Antwort von {server} erhalten."
+                )
+
+                for pending_future in futures:
+                    if pending_future is not future:
+                        pending_future.cancel()
+
+                executor.shutdown(wait=False, cancel_futures=True)
+                return result
+
+            except (
+                urllib.error.URLError,
+                urllib.error.HTTPError,
+                TimeoutError,
+                json.JSONDecodeError,
+            ) as error:
+                print(
+                    f"  Overpass: {server} fehlgeschlagen: {error}"
+                )
+                last_error = error
+
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     raise RuntimeError(
         f"Alle Overpass-Server sind fehlgeschlagen: {last_error}"

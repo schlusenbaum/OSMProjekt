@@ -205,6 +205,7 @@ def ensure_schema() -> None:
                 max_lat REAL,
                 max_lon REAL,
                 enabled INTEGER NOT NULL DEFAULT 0,
+                children_imported INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (parent_id) REFERENCES regions(id)
             )
             """
@@ -226,6 +227,22 @@ def ensure_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_regions_type "
             "ON regions(type)"
         )
+
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(regions)"
+            )
+        }
+
+        if "children_imported" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE regions
+                ADD COLUMN children_imported INTEGER NOT NULL DEFAULT 0
+                """
+            )
+            print("children_imported wurde zur bestehenden DB hinzugefügt.")
 
 
 def get_connection() -> sqlite3.Connection:
