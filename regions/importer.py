@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import PROJECT_ROOT, load_config
-from core.overpass import query_overpass
+from core.overpass import query_overpass_retry
 
 
 REGIONS_DB = PROJECT_ROOT / "regions" / "regions.db"
@@ -115,7 +115,7 @@ def query_overpass_regions(
 
     print("  Overpass: Regions-Abfrage wird zentral ausgeführt.")
 
-    data = query_overpass(query)
+    data = query_overpass_retry(query)
 
     save_cached_query(
         cache_key,

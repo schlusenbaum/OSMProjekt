@@ -8,6 +8,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.config import PROJECT_ROOT, load_config
 from core.gpx import add_waypoint, create_gpx, save_gpx
+from core.tiles import create_tiles
 
 
 POI_CONFIG_FILE = PROJECT_ROOT / "config" / "poi_types.json"
