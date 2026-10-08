@@ -63,6 +63,22 @@ def find_regions(
 def get_children(parent_id: int) -> list[dict]:
     return find_regions(parent_id=parent_id)
 
+def get_region_path(region_id: int) -> list[dict]:
+    """Liefert die Region und alle Elternregionen bis zum obersten Eintrag."""
+    path = []
+    current_id = region_id
+
+    while current_id is not None:
+        region = get_region(current_id)
+        if region is None:
+            break
+
+        path.append(region)
+        current_id = region["parent_id"]
+
+    path.reverse()
+    return path
+
 
 def get_enabled_regions() -> list[dict]:
     return find_regions(enabled_only=True)

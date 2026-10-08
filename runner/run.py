@@ -19,7 +19,10 @@ from core.cache import (
 from core.config import load_config
 from core.regions import find_regions, get_children
 from core.tiles import create_tiles
-from plugins.registry import get_plugin, get_plugins
+from plugins.registry import get_plugin
+
+
+ROUTE_PLUGIN_NAMES = ("bus", "hiking")
 
 
 def load_arguments() -> argparse.Namespace:
@@ -89,7 +92,10 @@ def load_arguments() -> argparse.Namespace:
         help="Routen suchen und erzeugen",
     )
 
-    route_plugins = get_plugins()
+    route_plugins = {
+        name: get_plugin(name)
+        for name in ROUTE_PLUGIN_NAMES
+    }
     route_type_help = "Routentyp: " + ", ".join(
         f"{name} = {module.PLUGIN_DESCRIPTION}"
         for name, module in sorted(route_plugins.items())
@@ -1114,6 +1120,9 @@ def main() -> None:
                 bbox,
                 force=getattr(args, "force", False),
             )
+
+            for route_item in route_items:
+                route_item.region = region
 
             route_items = route_plugin.sort_items(route_items)
 

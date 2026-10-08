@@ -10,3 +10,4 @@ class RouteItem:
     name: str
     description: str = ""
     data: Any = None
+    region: Any = None

@@ -22,6 +22,132 @@
         }
       ],
       "icon": "Parking Area"
+    },
+    "train_stations": {
+      "name": "Bahnhöfe",
+      "query": [
+        {
+          "railway": "station"
+        }
+      ],
+      "icon": "Train Station"
+    },
+    "parking": {
+      "name": "Parkplätze",
+      "query": [
+        {
+          "amenity": "parking"
+        }
+      ],
+      "icon": "Parking Area"
+    },
+    "shelter": {
+      "name": "Schutzhütten",
+      "query": [
+        {
+          "amenity": "shelter"
+        },
+        {
+          "shelter_type": "basic_hut"
+        }
+      ],
+      "icon": "Shelter"
+    },
+    "viewpoint": {
+      "name": "Aussichtspunkte",
+      "query": [
+        {
+          "tourism": "viewpoint"
+        }
+      ],
+      "icon": "Viewpoint"
+    },
+    "peak": {
+      "name": "Gipfel",
+      "query": [
+        {
+          "natural": "peak"
+        }
+      ],
+      "icon": "Peak"
+    },
+    "water": {
+      "name": "Wasser",
+      "query": [
+        {
+          "amenity": "drinking_water"
+        },
+        {
+          "amenity": "water_point"
+        }
+      ],
+      "icon": "Drinking Water"
+    },
+    "restaurant": {
+      "name": "Restaurants",
+      "query": [
+        {
+          "amenity": "restaurant"
+        }
+      ],
+      "icon": "Restaurant"
+    },
+    "cafe": {
+      "name": "Cafés",
+      "query": [
+        {
+          "amenity": "cafe"
+        }
+      ],
+      "icon": "Cafe"
+    },
+    "hotel": {
+      "name": "Hotels",
+      "query": [
+        {
+          "tourism": "hotel"
+        }
+      ],
+      "icon": "Hotel"
+    },
+    "camp_site": {
+      "name": "Campingplätze",
+      "query": [
+        {
+          "tourism": "camp_site"
+        }
+      ],
+      "icon": "Camping"
+    },
+    "fuel": {
+      "name": "Tankstellen",
+      "query": [
+        {
+          "amenity": "fuel"
+        }
+      ],
+      "icon": "Fuel"
+    },
+    "bicycle_parking": {
+      "name": "Fahrradparkplätze",
+      "query": [
+        {
+          "amenity": "bicycle_parking"
+        }
+      ],
+      "icon": "Bicycle Parking"
+    },
+    "bicycle_repair": {
+      "name": "Fahrrad-Reparatur",
+      "query": [
+        {
+          "service": "bicycle:repair"
+        },
+        {
+          "amenity": "bicycle_repair_station"
+        }
+      ],
+      "icon": "Bicycle Repair"
     }
   }
 }

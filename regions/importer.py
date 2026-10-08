@@ -1,13 +1,10 @@
 import json
 import sqlite3
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.config import PROJECT_ROOT, load_config
+from core.overpass import query_overpass
 
 
 REGIONS_DB = PROJECT_ROOT / "regions" / "regions.db"
@@ -116,76 +113,17 @@ def query_overpass_regions(
         print(f"  Regions-Cache verwendet: {cache_key}")
         return cached_data
 
-    config = get_regions_config()
-    servers = load_config()["overpass"]["servers"]
-    timeout = config["request_timeout"]
-    retry_rounds = config["retry_rounds"]
-    retry_delay = config["retry_delay_seconds"]
+    print("  Overpass: Regions-Abfrage wird zentral ausgeführt.")
 
-    last_error = None
+    data = query_overpass(query)
 
-    for retry_round in range(1, retry_rounds + 1):
-        print(
-            f"  Overpass-Versuch "
-            f"{retry_round}/{retry_rounds}"
-        )
-
-        for server in servers:
-            try:
-                data = urllib.parse.urlencode(
-                    {"data": query}
-                ).encode("utf-8")
-
-                request = urllib.request.Request(
-                    server,
-                    data=data,
-                    headers={
-                        "Content-Type":
-                            "application/x-www-form-urlencoded",
-                        "User-Agent":
-                            "OSMProjekt/1.0",
-                    },
-                    method="POST",
-                )
-
-                with urllib.request.urlopen(
-                    request,
-                    timeout=timeout,
-                ) as response:
-                    response_data = (
-                        response.read()
-                        .decode("utf-8")
-                    )
-
-                result = json.loads(response_data)
-
-                save_cached_query(
-                    cache_key,
-                    result,
-                    cache_version,
-                )
-
-                return result
-
-            except (
-                urllib.error.URLError,
-                urllib.error.HTTPError,
-                TimeoutError,
-                json.JSONDecodeError,
-            ) as error:
-                last_error = error
-                print(
-                    f"    Server fehlgeschlagen: "
-                    f"{server}"
-                )
-
-        if retry_round < retry_rounds:
-            time.sleep(retry_delay)
-
-    raise RuntimeError(
-        "Alle Regions-Overpass-Versuche "
-        f"sind fehlgeschlagen: {last_error}"
+    save_cached_query(
+        cache_key,
+        data,
+        cache_version,
     )
+
+    return data
 
 
 def ensure_schema() -> None:
@@ -383,38 +321,80 @@ out tags center bb;
 """
 
 
-def get_next_admin_level(elements: list[dict]) -> int | None:
-    """Ermittelt die niedrigste vorhandene admin_level einer Ergebnismenge."""
-    levels = []
+def build_combined_children_query(
+    parent_osm_id: int,
+    admin_levels: list[int],
+    country_code: str,
+) -> str:
+    if len(admin_levels) < 1:
+        raise ValueError("Keine relevanten admin_level vorhanden.")
 
-    for element in elements:
-        tags = element.get("tags", {})
-        value = tags.get("admin_level")
+    first_level = admin_levels[0]
 
-        if value is None:
-            continue
+    country_filter = ""
+    if first_level == 4:
+        country_filter = (
+            f'["ISO3166-2"~"^{country_code.upper()}-"]'
+        )
 
-        try:
-            levels.append(int(value))
-        except (TypeError, ValueError):
-            continue
-
-    if not levels:
-        return None
-
-    return min(levels)
-
-
-def build_descendants_query(parent_osm_id: int) -> str:
-    """Ermittelt alle administrativen Regionen innerhalb einer Elternregion."""
-    return f"""
+    query = f"""
 [out:json][timeout:120];
 relation({parent_osm_id});
-map_to_area->.parent;
-relation(area.parent)
-    ["boundary"="administrative"];
-out tags center bb;
+map_to_area->.parent_area;
+
+rel(area.parent_area)
+    ["boundary"="administrative"]
+    ["admin_level"="{first_level}"]
+    {country_filter}
+    ->.level_{first_level};
+
+foreach.level_{first_level}->.parent_relation(
+    .parent_relation out tags center bb;
 """
+
+    def append_children(level_index: int, indent: str = "    ") -> str:
+        if level_index >= len(admin_levels):
+            return ""
+
+        current_level = admin_levels[level_index]
+
+        result = f"""
+{indent}.parent_relation map_to_area ->.parent_area;
+{indent}rel(area.parent_area)
+{indent}    ["boundary"="administrative"]
+{indent}    ["admin_level"="{current_level}"]
+{indent}    ->.level_{current_level};
+"""
+
+        if level_index == len(admin_levels) - 1:
+            result += f"""
+{indent}.level_{current_level} out tags center bb;
+"""
+            return result
+
+        result += f"""
+{indent}foreach.level_{current_level}->.parent_relation(
+{indent}    .parent_relation out tags center bb;
+"""
+
+        result += append_children(
+            level_index + 1,
+            indent + "    ",
+        )
+
+        result += f"""
+{indent});
+"""
+
+        return result
+
+    query += append_children(1)
+
+    query += """
+);
+"""
+
+    return query
 
 
 def import_country(country_code: str) -> None:
@@ -701,63 +681,56 @@ def import_children(
     parent_total: int | None = None,
     country_code: str = "DE",
 ) -> None:
+    admin_levels = get_relevant_admin_levels(country_code)
+
+    if admin_level not in admin_levels:
+        raise RuntimeError(
+            f"admin_level={admin_level} ist für "
+            f"{country_code.upper()} nicht relevant."
+        )
+
+    start_index = admin_levels.index(admin_level)
+    first_level = admin_levels[start_index]
+    remaining_levels = admin_levels[start_index + 1:]
+
+    query = build_children_query(
+        parent_osm_id,
+        first_level,
+        country_code,
+    )
+
+    cache_key = f"admin_{parent_osm_id}_{first_level}"
+
     try:
         data = query_overpass_regions(
-            build_children_query(
-                parent_osm_id,
-                admin_level,
-                country_code,
-            ),
-            f"admin_{parent_osm_id}_{admin_level}",
+            query,
+            cache_key,
         )
     except RuntimeError as error:
         print(
-            f"  Überspringe admin_level={admin_level} "
-            f"für OSM {parent_osm_id}: {error}"
+            f"  Überspringe Regionsimport für "
+            f"OSM {parent_osm_id}: {error}"
         )
         return
 
     elements = data.get("elements", [])
 
     print(
-        f"  admin_level={admin_level}: "
+        f"  admin_level={first_level}: "
         f"{len(elements)} Regionen"
     )
 
     for number, element in enumerate(elements, start=1):
+        if element.get("type") != "relation":
+            continue
+
         tags = element.get("tags", {})
         name = tags.get("name")
 
         if not name:
             continue
 
-        if admin_level == 4:
-            print(
-                f"Bundesland {number}/{len(elements)}: {name}"
-            )
-        elif admin_level == 6:
-            parent_name = "unbekannt"
-
-            with get_connection() as connection:
-                parent_row = connection.execute(
-                    """
-                    SELECT name
-                    FROM regions
-                    WHERE id = ?
-                    """,
-                    (parent_db_id,),
-                ).fetchone()
-
-            if parent_row is not None:
-                parent_name = parent_row[0]
-
-            print(
-                f"Bundesland {parent_number}/{parent_total}: "
-                f"{parent_name}"
-            )
-            print(
-                f"  Kreis {number}/{len(elements)}: {name}"
-            )
+        bounds = element.get("bounds", {})
 
         with get_connection() as connection:
             existing = connection.execute(
@@ -771,16 +744,37 @@ def import_children(
 
             if existing:
                 db_id = existing[0]
-                print(
-                    f"    Bereits vorhanden: {name}"
-                )
-                if admin_level == 4:
-                    print(
-                        f"    Lade Kreise und Gemeinden für {name} ..."
-                    )
-            else:
-                bounds = element.get("bounds", {})
 
+                connection.execute(
+                    """
+                    UPDATE regions
+                    SET
+                        name = ?,
+                        type = ?,
+                        parent_id = ?,
+                        min_lat = ?,
+                        min_lon = ?,
+                        max_lat = ?,
+                        max_lon = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        name,
+                        region_type,
+                        parent_db_id,
+                        bounds.get("minlat"),
+                        bounds.get("minlon"),
+                        bounds.get("maxlat"),
+                        bounds.get("maxlon"),
+                        db_id,
+                    ),
+                )
+                connection.commit()
+
+                print(
+                    f"  Bereits vorhanden: {name}"
+                )
+            else:
                 db_id = insert_region(
                     connection,
                     name,
@@ -796,45 +790,139 @@ def import_children(
                 connection.commit()
 
                 print(
-                    f"    Gespeichert: {name}"
+                    f"  Gespeichert: {name}"
                 )
 
-        next_admin_level = get_next_relevant_admin_level(
+        if not remaining_levels:
+            continue
+
+        query = build_combined_children_query(
+            element["id"],
+            remaining_levels,
             country_code,
-            admin_level,
         )
 
-        if next_admin_level is not None:
+        cache_key = (
+            f"admin_{element['id']}_{remaining_levels[0]}"
+        )
+
+        try:
+            nested_data = query_overpass_regions(
+                query,
+                cache_key,
+            )
+        except RuntimeError as error:
             print(
-                f"    Lade nächste Ebene "
-                f"admin_level={next_admin_level} für {name} ..."
+                f"  Überspringe Unterregionen für "
+                f"{name}: {error}"
             )
+            continue
 
-            import_children(
-                element["id"],
-                db_id,
-                next_admin_level,
-                get_region_type(next_admin_level),
-                parent_number=number,
-                parent_total=len(elements),
-                country_code=country_code,
-            )
-        else:
-            next_admin_level = get_next_relevant_admin_level(
-                country_code,
-                admin_level,
-            )
+        nested_elements = nested_data.get("elements", [])
 
-            if next_admin_level is not None:
+        print(
+            f"  {name}: kombinierte Abfrage "
+            f"{remaining_levels} → "
+            f"{len(nested_elements)} Elemente"
+        )
+
+        current_parent_ids = {
+            first_level: db_id
+        }
+
+        for nested_element in nested_elements:
+            if nested_element.get("type") != "relation":
+                continue
+
+            nested_tags = nested_element.get("tags", {})
+            nested_name = nested_tags.get("name")
+            nested_admin_level = nested_tags.get("admin_level")
+
+            if not nested_name or not nested_admin_level:
+                continue
+
+            try:
+                current_level = int(nested_admin_level)
+            except ValueError:
+                continue
+
+            if current_level not in remaining_levels:
+                continue
+
+            level_index = remaining_levels.index(current_level)
+
+            if level_index == 0:
+                nested_parent_id = db_id
+            else:
+                parent_level = remaining_levels[level_index - 1]
+                nested_parent_id = current_parent_ids.get(parent_level)
+
+            if nested_parent_id is None:
                 print(
-                    f"    Lade nächste Ebene "
-                    f"admin_level={next_admin_level} für {name} ..."
+                    f"  WARNUNG: Elternregion für "
+                    f"{nested_name} "
+                    f"(admin_level={current_level}) "
+                    f"nicht gefunden."
                 )
+                continue
 
-                import_children(
-                    element["id"],
-                    db_id,
-                    next_admin_level,
-                    get_region_type(next_admin_level),
-                    country_code=country_code,
-                )
+            nested_region_type = get_region_type(current_level)
+            nested_bounds = nested_element.get("bounds", {})
+
+            with get_connection() as connection:
+                existing = connection.execute(
+                    """
+                    SELECT id
+                    FROM regions
+                    WHERE osm_type = ? AND osm_id = ?
+                    """,
+                    ("relation", nested_element["id"]),
+                ).fetchone()
+
+                if existing:
+                    nested_db_id = existing[0]
+
+                    connection.execute(
+                        """
+                        UPDATE regions
+                        SET
+                            name = ?,
+                            type = ?,
+                            parent_id = ?,
+                            min_lat = ?,
+                            min_lon = ?,
+                            max_lat = ?,
+                            max_lon = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            nested_name,
+                            nested_region_type,
+                            nested_parent_id,
+                            nested_bounds.get("minlat"),
+                            nested_bounds.get("minlon"),
+                            nested_bounds.get("maxlat"),
+                            nested_bounds.get("maxlon"),
+                            nested_db_id,
+                        ),
+                    )
+                    connection.commit()
+                else:
+                    nested_db_id = insert_region(
+                        connection,
+                        nested_name,
+                        nested_region_type,
+                        nested_parent_id,
+                        "relation",
+                        nested_element["id"],
+                        nested_bounds.get("minlat"),
+                        nested_bounds.get("minlon"),
+                        nested_bounds.get("maxlat"),
+                        nested_bounds.get("maxlon"),
+                    )
+                    connection.commit()
+
+            current_parent_ids[current_level] = nested_db_id
+
+            for deeper_level in remaining_levels[level_index + 1:]:
+                current_parent_ids.pop(deeper_level, None)

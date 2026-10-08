@@ -486,6 +486,7 @@ def build_relation_tracks(
 def generate_bus_gpx(
     ref: str,
     discovered_relations: list[dict],
+    region=None,
     force: bool = False,
 ) -> Path | None:
     """
@@ -504,8 +505,19 @@ def generate_bus_gpx(
         exist_ok=True,
     )
 
+    if region is not None:
+        from core.regions import get_region_path
+
+        region_path = get_region_path(region["id"])
+        output_dir = GPX_OUTPUT
+
+        for path_region in region_path:
+            output_dir = output_dir / clean_filename(path_region["name"])
+    else:
+        output_dir = GPX_OUTPUT
+
     output_file = (
-        GPX_OUTPUT
+        output_dir
         / f"{clean_filename(ref)}.gpx"
     )
 
@@ -685,7 +697,7 @@ def generate_bus_gpx(
     return output_file
 
 
-def discover(bbox, force=False):
+def discover(bbox, region=None, force=False):
     """Routen für die gemeinsame Plugin-Schnittstelle entdecken."""
     from core.routes import RouteItem
 
@@ -697,6 +709,7 @@ def discover(bbox, force=False):
             name=str(ref),
             description=f"{len(relations)} Relation(en)",
             data=relations,
+            region=region,
         )
         for ref, relations in sorted(
             bus_lines.items(),
@@ -710,6 +723,7 @@ def generate(route_item, force=False):
     return generate_bus_gpx(
         route_item.name,
         route_item.data,
+        region=route_item.region,
         force=force,
     )
 
