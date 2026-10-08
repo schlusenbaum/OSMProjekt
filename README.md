@@ -117,4 +117,4 @@ Bei großen Bereichen ist ein erneuter Versuch später oder eine kleinere Region
 
 ## Lizenz
 
-Für dieses Repository ist derzeit keine Lizenzdatei hinterlegt. Vor einer Weiterverwendung sollte eine passende Lizenz ergänzt werden.
+Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).
