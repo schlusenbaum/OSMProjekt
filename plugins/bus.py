@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.gpx import add_metadata, add_track, create_gpx, save_gpx
 from core.overpass import query_overpass_retry
@@ -10,8 +15,7 @@ from core.overpass import query_overpass_retry
 
 PLUGIN_NAME = "bus"
 PLUGIN_DESCRIPTION = "Buslinien"
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PLUGIN_COMMAND = "route"
 
 BUS_CACHE = PROJECT_ROOT / "cache" / "transit"
 GPX_OUTPUT = PROJECT_ROOT / "output" / "gpx" / "routes" / "bus"
@@ -763,3 +767,94 @@ def print_selected(items):
 
 def get_selection_prompt():
     return "\nAuswahl (z.B. 3 oder 3,7-10, b zurück, q zum Abbrechen): "
+
+def configure_cli(parser: argparse.ArgumentParser) -> None:
+    """Registriert die Argumente des Routen-Plugins."""
+    parser.add_argument(
+        "--region",
+        action="store_true",
+        required=True,
+        help="Arbeitsregion interaktiv auswählen",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Cache ignorieren und Overpass erneut abfragen",
+    )
+
+
+def run_cli(args: argparse.Namespace) -> None:
+    """Führt die vollständige, eigenständige Routen-Auswahl aus."""
+    from core.cli import select_region_interactive
+
+    while True:
+        region = select_region_interactive()
+        bbox = (
+            region["min_lat"],
+            region["min_lon"],
+            region["max_lat"],
+            region["max_lon"],
+        )
+        route_items = discover(bbox, force=args.force)
+
+        for route_item in route_items:
+            route_item.region = region
+
+        route_items = sort_items(route_items)
+        print_items(route_items)
+
+        while True:
+            value = input(get_selection_prompt()).strip().lower()
+
+            if value == "q":
+                print("Auswahl abgebrochen.")
+                return
+            if value == "b":
+                print("Zurück zur Regionenauswahl.")
+                break
+
+            try:
+                selected_numbers = set()
+                for part in value.split(","):
+                    if "-" in part:
+                        start, end = (int(number) for number in part.split("-", 1))
+                        if start > end:
+                            raise ValueError
+                        selected_numbers.update(range(start, end + 1))
+                    else:
+                        selected_numbers.add(int(part))
+
+                if not selected_numbers or any(
+                    number < 1 or number > len(route_items)
+                    for number in selected_numbers
+                ):
+                    raise ValueError
+            except ValueError:
+                print("Ungültige Auswahl. Bitte das angegebene Format verwenden.")
+                continue
+
+            selected_items = [
+                route_items[number - 1] for number in sorted(selected_numbers)
+            ]
+            print_selected(selected_items)
+            print("\nErzeuge GPX-Dateien...")
+
+            for route_item in selected_items:
+                output_files = generate(route_item, force=args.force)
+                for output_file in (
+                    output_files
+                    if isinstance(output_files, (list, tuple))
+                    else [output_files]
+                ):
+                    print(f"  Erzeugt: {output_file}")
+            return
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=PLUGIN_DESCRIPTION)
+    configure_cli(parser)
+    run_cli(parser.parse_args())
+
+
+if __name__ == "__main__":
+    main()

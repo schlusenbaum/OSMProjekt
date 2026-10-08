@@ -1,5 +1,10 @@
+import argparse
 import json
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.config import PROJECT_ROOT, load_config
 from core.gpx import add_waypoint, create_gpx, save_gpx
@@ -7,6 +12,9 @@ from core.gpx import add_waypoint, create_gpx, save_gpx
 
 POI_CONFIG_FILE = PROJECT_ROOT / "config" / "poi_types.json"
 OUTPUT_DIR = PROJECT_ROOT / "output" / "gpx" / "poi"
+PLUGIN_NAME = "poi"
+PLUGIN_DESCRIPTION = "POIs"
+PLUGIN_COMMAND = "poi"
 
 
 def load_poi_config() -> dict:
@@ -236,3 +244,79 @@ def generate(
             output_files.append(output_file)
 
     return output_files
+
+def configure_cli(parser: argparse.ArgumentParser) -> None:
+    """Registriert die Argumente des POI-Plugins."""
+    location = parser.add_mutually_exclusive_group(required=True)
+    location.add_argument("--region", action="store_true")
+    location.add_argument("--bbox", help="BBOX: min_lat,min_lon,max_lat,max_lon")
+    parser.add_argument("--force", action="store_true")
+
+
+def run_cli(args: argparse.Namespace) -> None:
+    """Führt die vollständige, eigenständige POI-Auswahl aus."""
+    from core.cli import (
+        collect_osm_data,
+        parse_bbox,
+        select_region_interactive,
+    )
+    region = select_region_interactive() if args.region else None
+    bbox = (
+        (region["min_lat"], region["min_lon"], region["max_lat"], region["max_lon"])
+        if region is not None
+        else parse_bbox(args.bbox)
+    )
+    poi_items = sort_items(discover(bbox, force=args.force))
+    if not poi_items:
+        raise ValueError("Keine POI-Typen verfügbar.")
+
+    print_items(poi_items)
+    while True:
+        value = input(get_selection_prompt()).strip().lower()
+        if value in {"", "q"}:
+            print("Auswahl abgebrochen.")
+            return
+        try:
+            selected_numbers = set()
+            for part in value.split(","):
+                if "-" in part:
+                    start, end = (int(number) for number in part.split("-", 1))
+                    if start > end:
+                        raise ValueError
+                    selected_numbers.update(range(start, end + 1))
+                else:
+                    selected_numbers.add(int(part))
+            if not selected_numbers or any(
+                number < 1 or number > len(poi_items)
+                for number in selected_numbers
+            ):
+                raise ValueError
+        except ValueError:
+            print("Ungültige Auswahl. Bitte das angegebene Format verwenden.")
+            continue
+        break
+
+    selected_items = [poi_items[number - 1] for number in sorted(selected_numbers)]
+    print_selected(selected_items)
+    min_lat, min_lon, max_lat, max_lon = bbox
+    tiles = create_tiles(min_lat, min_lon, max_lat, max_lon)
+    print(f"{len(tiles)} Kacheln erzeugt.")
+    elements = collect_osm_data(tiles, force=args.force, build_query=build_query)
+    print(f"\nInsgesamt {len(elements)} OSM-Objekte aus Cache/Overpass.")
+
+    for output_file in generate(
+        selected_items,
+        elements,
+        region_name=region["name"] if region else None,
+    ):
+        print(f"  Erzeugt: {output_file}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=PLUGIN_DESCRIPTION)
+    configure_cli(parser)
+    run_cli(parser.parse_args())
+
+
+if __name__ == "__main__":
+    main()
