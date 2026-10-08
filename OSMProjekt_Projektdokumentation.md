@@ -180,6 +180,15 @@ Bestehende Aufrufer müssen deshalb nicht zwingend angepasst werden.
 
 Die fachliche Logik bleibt innerhalb der jeweiligen Plugins. Gemeinsame technische Funktionen werden nach Möglichkeit in `core/` gehalten.
 
+Jedes Plugin besitzt außerdem eine eigene CLI und kann unabhängig vom Runner gestartet werden:
+
+    python3 plugins/bus.py --help
+    python3 plugins/hiking.py --help
+    python3 plugins/poi.py --help
+    python3 plugins/regions.py --help
+
+Der Runner stellt nur eine dynamische gemeinsame Startschicht bereit. Er importiert keine einzelnen Plugins und enthält keine fachbezogenen Abläufe.
+
 ## 11. Cache
 
 Der Cache dient dazu, bereits erfolgreich geladene Daten wiederzuverwenden.
