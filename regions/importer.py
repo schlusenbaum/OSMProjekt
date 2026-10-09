@@ -422,6 +422,12 @@ def import_country(country_code: str) -> None:
         )
 
     country_tags = country.get("tags", {})
+    bounds = country.get("bounds", {})
+
+    min_lat = bounds.get("minlat")
+    min_lon = bounds.get("minlon")
+    max_lat = bounds.get("maxlat")
+    max_lon = bounds.get("maxlon")
 
     print(
         f"{country_tags.get('name', country_code.upper())} gefunden: "
@@ -440,6 +446,27 @@ def import_country(country_code: str) -> None:
 
         if existing:
             country_id = existing[0]
+
+            connection.execute(
+                """
+                UPDATE regions
+                SET name = ?,
+                    min_lat = ?,
+                    min_lon = ?,
+                    max_lat = ?,
+                    max_lon = ?
+                WHERE id = ?
+                """,
+                (
+                    country_tags.get("name", country_code.upper()),
+                    min_lat,
+                    min_lon,
+                    max_lat,
+                    max_lon,
+                    country_id,
+                ),
+            )
+            connection.commit()
         else:
             country_id = insert_region(
                 connection,
@@ -448,6 +475,10 @@ def import_country(country_code: str) -> None:
                 None,
                 "relation",
                 country["id"],
+                min_lat,
+                min_lon,
+                max_lat,
+                max_lon,
             )
             connection.commit()
 

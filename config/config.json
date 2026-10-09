@@ -7,13 +7,14 @@
     ],
     "query_timeout": 15,
     "request_timeout": 15,
-    "retry_rounds": 3,
-    "retry_delay_seconds": 5
+    "retry_rounds": 5,
+    "retry_delay_seconds": 3
   },
   "cache": {
     "ttl_days": 7,
     "retry_failed_tiles": true,
-    "hiking_routes_ttl_days": 180
+    "hiking_routes_ttl_days": 180,
+    "bicycle_routes_ttl_days": 180
   },
   "regions": {
     "cache_ttl_days": 180,

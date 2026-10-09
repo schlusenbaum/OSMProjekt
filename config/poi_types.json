@@ -30,7 +30,7 @@
           "railway": "station"
         }
       ],
-      "icon": "Train Station"
+      "icon": "Railway"
     },
     "parking": {
       "name": "Parkplätze",
@@ -51,7 +51,7 @@
           "shelter_type": "basic_hut"
         }
       ],
-      "icon": "Shelter"
+      "icon": "Lodge"
     },
     "viewpoint": {
       "name": "Aussichtspunkte",
@@ -60,7 +60,7 @@
           "tourism": "viewpoint"
         }
       ],
-      "icon": "Viewpoint"
+      "icon": "Scenic Area"
     },
     "peak": {
       "name": "Gipfel",
@@ -69,7 +69,7 @@
           "natural": "peak"
         }
       ],
-      "icon": "Peak"
+      "icon": "Summit"
     },
     "water": {
       "name": "Wasser",
@@ -99,7 +99,7 @@
           "amenity": "cafe"
         }
       ],
-      "icon": "Cafe"
+      "icon": "Food"
     },
     "hotel": {
       "name": "Hotels",
@@ -108,7 +108,7 @@
           "tourism": "hotel"
         }
       ],
-      "icon": "Hotel"
+      "icon": "Lodging"
     },
     "camp_site": {
       "name": "Campingplätze",
@@ -117,7 +117,7 @@
           "tourism": "camp_site"
         }
       ],
-      "icon": "Camping"
+      "icon": "Campground"
     },
     "fuel": {
       "name": "Tankstellen",
@@ -126,28 +126,7 @@
           "amenity": "fuel"
         }
       ],
-      "icon": "Fuel"
-    },
-    "bicycle_parking": {
-      "name": "Fahrradparkplätze",
-      "query": [
-        {
-          "amenity": "bicycle_parking"
-        }
-      ],
-      "icon": "Bicycle Parking"
-    },
-    "bicycle_repair": {
-      "name": "Fahrrad-Reparatur",
-      "query": [
-        {
-          "service": "bicycle:repair"
-        },
-        {
-          "amenity": "bicycle_repair_station"
-        }
-      ],
-      "icon": "Bicycle Repair"
+      "icon": "Gas Station"
     }
   }
 }
