@@ -55,6 +55,10 @@ Den Cache für einen Lauf ignorieren:
 
 Bus-GPX-Dateien werden unter output/gpx/routes/bus/ nach der ausgewählten Regionshierarchie abgelegt.
 
+### Fahrradrouten
+
+    python3 runner/run.py route --type bicycle --region
+
 ### Regionsdatenbank
 
 Import eines Landes:
@@ -74,6 +78,7 @@ Jedes Plugin besitzt seine eigene CLI und kann unabhängig vom Runner gestartet 
     python3 plugins/poi.py --region
     python3 plugins/hiking.py --region
     python3 plugins/bus.py --region
+    python3 plugins/bicycle.py --help
     python3 plugins/regions.py import --country DE
 
 Der Runner ist lediglich eine gemeinsame dynamische Startschicht. Fachliche Abläufe bleiben in den Plugins.

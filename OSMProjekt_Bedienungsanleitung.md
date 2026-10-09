@@ -1,6 +1,22 @@
 # OSMProjekt – Bedienungsanleitung
 
-Alle Befehle werden aus dem Projektverzeichnis ausgeführt.
+## Installation
+
+Voraussetzungen:
+- Python 3.10 oder neuer
+- Git
+- Internetzugang für den Abruf neuer OSM-Daten
+
+Repository herunterladen und in das Projektverzeichnis wechseln:
+
+    git clone https://github.com/schlusenbaum/OSMProjekt.git
+    cd OSMProjekt
+
+Installation prüfen:
+
+    python3 runner/run.py --help
+
+Alle folgenden Befehle werden aus dem Projektverzeichnis ausgeführt.
 
 ## Zentraler Einstieg
 
@@ -22,6 +38,10 @@ Die POI-Kategorien werden nach der Bereichsauswahl interaktiv gewählt. Die verf
 
     python3 runner/run.py route --type bus --region
 
+### Fahrradrouten
+
+    python3 runner/run.py route --type bicycle --region
+
 ### Regionsimport
 
     python3 runner/run.py regions import --country PL
@@ -37,6 +57,7 @@ Die Plugins sind unabhängig vom Runner ausführbar:
     python3 plugins/poi.py --region
     python3 plugins/hiking.py --region
     python3 plugins/bus.py --region
+    python3 plugins/bicycle.py --help
     python3 plugins/regions.py import --country DE
 
 ## Ausgabeverzeichnisse
