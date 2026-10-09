@@ -12,6 +12,36 @@ Das Projekt besteht aus gemeinsamen Core-Komponenten und eigenständigen Plugins
 
 Es werden ausschließlich Python-Standardbibliotheken verwendet.
 
+## Installation
+
+### Voraussetzungen
+
+- Python 3.10 oder neuer
+- Git zum Herunterladen des Projekts
+- Internetzugriff für den Abruf neuer OpenStreetMap-Daten
+
+Es werden keine zusätzlichen Python-Pakete benötigt. Das Projekt verwendet ausschließlich Python-Standardbibliotheken.
+
+### Projekt herunterladen
+
+Repository klonen:
+
+    git clone https://github.com/schlusenbaum/OSMProjekt.git
+
+In das Projektverzeichnis wechseln:
+
+    cd OSMProjekt
+
+Installation und Start überprüfen:
+
+    python3 runner/run.py --help
+
+Wenn die Hilfe mit den verfügbaren Befehlen angezeigt wird, funktioniert der grundlegende Projektstart.
+
+Die Regionsdatenbank ist bereits im Repository enthalten. Cache-Dateien und erzeugte GPX-Dateien werden bei Bedarf lokal angelegt.
+
+Alle folgenden Befehle werden aus dem Projektverzeichnis OSMProjekt ausgeführt.
+
 ## Schnellstart
 
 Der zentrale Einstiegspunkt:
