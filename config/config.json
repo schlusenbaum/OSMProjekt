@@ -12,9 +12,7 @@
   },
   "cache": {
     "ttl_days": 7,
-    "retry_failed_tiles": true,
-    "hiking_routes_ttl_days": 180,
-    "bicycle_routes_ttl_days": 180
+    "retry_failed_tiles": true
   },
   "regions": {
     "cache_ttl_days": 180,
@@ -32,6 +30,16 @@
         "max_lat": 90.0,
         "max_lon": 180.0
       }
+    ]
+  },
+  "routes": {
+    "query_timeout": 60,
+    "index_ttl_days": 180,
+    "index_types": [
+      "hiking",
+      "bicycle",
+      "bus",
+      "mtb"
     ]
   }
 }

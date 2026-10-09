@@ -7,9 +7,8 @@ nach einer getrennten Prüfung.
 """
 
 import argparse
-import json
+import re
 import sys
-import time
 from pathlib import Path
 
 
@@ -20,12 +19,12 @@ PLUGIN_COMMAND = "route"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from core.config import load_config
-from core.overpass import query_overpass_adaptive, query_overpass_retry
-from core.routes import RouteItem
+from core.routes import RouteItem, find_route_relations, load_route_relation
+from core.gpx import add_metadata, add_track, create_gpx, save_gpx
+from plugins.hiking import build_main_track_from_graph
 
 
-ROUTE_CACHE = PROJECT_ROOT / "cache" / "routes"
+GPX_OUTPUT = PROJECT_ROOT / "output" / "gpx" / "routes" / "bicycle"
 
 
 def route_category(tags: dict) -> str:
@@ -47,68 +46,25 @@ def find_bicycle_routes(
     bbox: tuple[float, float, float, float],
     force: bool = False,
 ) -> list[dict]:
-    """Lädt ausgewiesene OSM-Fahrradrouten im Gebiet mit BBOX-Cache."""
-    south, west, north, east = bbox
-    config = load_config()
-
-    ROUTE_CACHE.mkdir(parents=True, exist_ok=True)
-    cache_path = ROUTE_CACHE / (
-        f"bicycle_{south:.6f}_{west:.6f}_{north:.6f}_{east:.6f}.json"
-    )
-    ttl_seconds = config["cache"]["bicycle_routes_ttl_days"] * 24 * 60 * 60
-
-    if cache_path.exists() and not force:
-        age_seconds = time.time() - cache_path.stat().st_mtime
-
-        if age_seconds < ttl_seconds:
-            data = json.loads(cache_path.read_text(encoding="utf-8"))
-            print(f"Fahrradrouten aus Cache geladen: {cache_path.name}")
-            return data["routes"]
-
-    areas = [
-        {
-            "min_lat": south,
-            "min_lon": west,
-            "max_lat": north,
-            "max_lon": east,
-        }
-    ]
-
-    successful_groups, failed_areas = query_overpass_adaptive(
-        areas,
-        lambda min_lat, min_lon, max_lat, max_lon: f"""
-[out:json][timeout:{config["overpass"]["query_timeout"]}];
-relation
-  ["type"="route"]
-  ["route"="bicycle"]
-  ({min_lat},{min_lon},{max_lat},{max_lon});
-out tags;
-""",
-    )
-
-    if failed_areas:
-        raise RuntimeError(
-            "Fahrradrouten konnten nicht vollständig von Overpass geladen werden."
-        )
+    """Filtert Fahrradrouten aus dem gemeinsamen Routenindex."""
 
     routes = []
 
-    for _, data in successful_groups:
-        for element in data.get("elements", []):
-            tags = element.get("tags", {})
-            routes.append(
-                {
-                    "relation_id": element["id"],
-                    "name": tags.get("name", ""),
-                    "ref": tags.get("ref", ""),
-                    "network": tags.get("network", ""),
-                    "category": route_category(tags),
-                    "distance": tags.get("distance", ""),
-                    "operator": tags.get("operator", ""),
-                    "wikidata": tags.get("wikidata", ""),
-                    "wikipedia": tags.get("wikipedia", ""),
-                }
-            )
+    for element in find_route_relations(bbox, "bicycle", force=force):
+        tags = element.get("tags", {})
+        routes.append(
+            {
+                "relation_id": element["id"],
+                "name": tags.get("name", ""),
+                "ref": tags.get("ref", ""),
+                "network": tags.get("network", ""),
+                "category": route_category(tags),
+                "distance": tags.get("distance", ""),
+                "operator": tags.get("operator", ""),
+                "wikidata": tags.get("wikidata", ""),
+                "wikipedia": tags.get("wikipedia", ""),
+            }
+        )
 
     routes.sort(
         key=lambda route: (
@@ -116,12 +72,6 @@ out tags;
             route["relation_id"],
         )
     )
-
-    cache_path.write_text(
-        json.dumps({"routes": routes}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    print(f"Fahrradrouten im Cache gespeichert: {cache_path.name}")
 
     return routes
 
@@ -137,60 +87,6 @@ def discover(bbox: tuple[float, float, float, float], force: bool = False) -> li
         )
         for route in find_bicycle_routes(bbox, force=force)
     ]
-
-
-def load_relation(
-    relation_id: int,
-    force: bool = False,
-) -> tuple[dict, dict[int, dict], dict[int, dict]]:
-    """Lädt eine ausgewählte Relation samt Ways und Nodes mit Cache."""
-    ROUTE_CACHE.mkdir(parents=True, exist_ok=True)
-    cache_path = ROUTE_CACHE / f"bicycle_relation_{relation_id}.json"
-
-    if cache_path.exists() and not force:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-        print(f"Relations-Cache geladen: {cache_path.name}")
-    else:
-        config = load_config()
-        query = f"""
-[out:json][timeout:{config["overpass"]["query_timeout"]}];
-relation({relation_id});
-(._;>;);
-out body;
-"""
-        data = query_overpass_retry(query)
-        cache_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"Relations-Cache gespeichert: {cache_path.name}")
-
-    elements = data.get("elements", [])
-
-    relation = next(
-        (
-            element
-            for element in elements
-            if element.get("type") == "relation"
-            and element.get("id") == relation_id
-        ),
-        None,
-    )
-    if relation is None:
-        raise ValueError(f"Relation {relation_id} wurde nicht geladen.")
-
-    ways = {
-        element["id"]: element
-        for element in elements
-        if element.get("type") == "way"
-    }
-    nodes = {
-        element["id"]: element
-        for element in elements
-        if element.get("type") == "node"
-    }
-
-    return relation, ways, nodes
 
 
 def geometry_summary(relation: dict, ways: dict[int, dict]) -> dict:
@@ -266,7 +162,7 @@ def inspect_selected_route(route_item: RouteItem, force: bool = False) -> None:
     """Lädt und berichtet die Geometrie einer ausgewählten Fahrradroute."""
     relation_id = int(route_item.id)
     print(f"\nLade Relation {relation_id} ...")
-    relation, ways, nodes = load_relation(relation_id, force=force)
+    relation, ways, nodes = load_route_relation(relation_id, force=force)
     summary = geometry_summary(relation, ways)
 
     print(f"  Ways in Relation: {summary['ways']}")
@@ -274,6 +170,85 @@ def inspect_selected_route(route_item: RouteItem, force: bool = False) -> None:
     print(f"  Zusammenhangskomponenten: {summary['components']}")
     print(f"  Geometrische Endpunkte: {len(summary['endpoints'])}")
     print(f"  Geladene Nodes: {len(nodes)}")
+
+
+def clean_filename(value: str) -> str:
+    """Erzeugt einen plattformunabhängig sicheren GPX-Dateinamen."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    return cleaned or "Fahrradroute"
+
+
+def generate_bicycle_gpx(
+    relation_id: int,
+    force: bool = False,
+) -> Path:
+    """Erzeugt eine GPX-Datei aus einer ausgewählten Fahrradrelation."""
+    relation, ways, nodes = load_route_relation(relation_id, force=force)
+    tags = relation.get("tags", {})
+    name = tags.get("name") or tags.get("ref") or f"Relation {relation_id}"
+    ref = tags.get("ref")
+
+    tracks = build_main_track_from_graph(relation, ways)
+    point_tracks = []
+
+    for track_nodes in tracks:
+        points = [
+            (nodes[node_id]["lat"], nodes[node_id]["lon"])
+            for node_id in track_nodes
+            if node_id in nodes
+        ]
+        if len(points) >= 2:
+            point_tracks.append(points)
+
+    if not point_tracks:
+        raise ValueError(
+            f"Relation {relation_id} enthält keine exportierbare Geometrie."
+        )
+
+    description_parts = []
+    operator = tags.get("operator")
+    distance = tags.get("distance")
+    network = tags.get("network")
+
+    if operator:
+        description_parts.append(f"Betreiber: {operator}")
+    if ref:
+        description_parts.append(f"Ref: {ref}")
+    if distance:
+        description_parts.append(f"Länge: {distance} km")
+    if network:
+        network_names = {
+            "icn": "International",
+            "ncn": "National",
+            "rcn": "Regional",
+            "lcn": "Lokal",
+        }
+        description_parts.append(
+            f"Netzwerk: {network_names.get(network, network)}"
+        )
+
+    description = "<br />".join(description_parts) or None
+    gpx = create_gpx()
+    add_metadata(gpx, name=name, description=description, author=operator)
+
+    for index, points in enumerate(point_tracks, start=1):
+        track_name = name if len(point_tracks) == 1 else f"{name} – Abschnitt {index}"
+        add_track(
+            gpx,
+            points,
+            name=track_name,
+            description=description,
+            track_type="Cycling",
+        )
+
+    output_file = GPX_OUTPUT / f"{clean_filename(name)}_{relation_id}.gpx"
+    save_gpx(gpx, output_file)
+    return output_file
+
+
+def generate(route_item: RouteItem, force: bool = False) -> Path:
+    """Erzeugt die GPX-Datei für ein einheitliches RouteItem."""
+    return generate_bicycle_gpx(int(route_item.id), force=force)
 
 
 def sort_items(items: list[RouteItem]) -> list[RouteItem]:
@@ -298,14 +273,21 @@ def print_items(items: list[RouteItem]) -> None:
     print()
     print(f"Gefundene Fahrradrouten: {len(items)}")
     print()
-    print(f'{"Nr":>3} | {"Kategorie":<34} | {"Ref":<16} | Name')
-    print("-" * 105)
+    print(
+        f'{"Nr":>3} | '
+        f'{"Kategorie":<34} | '
+        f'{"Ref":<16} | '
+        f'{"Länge":<8} | '
+        "Name"
+    )
+    print("-" * 116)
 
     for number, item in enumerate(items, 1):
         print(
             f'{number:>3} | '
             f'{item.data["category"]:<34} | '
             f'{item.data["ref"]:<16} | '
+            f'{item.data["distance"]:<8} | '
             f'{item.name}'
         )
 
@@ -403,8 +385,8 @@ def run_cli(args: argparse.Namespace) -> None:
 
             for route_item in selected_items:
                 inspect_selected_route(route_item, force=args.force)
-
-            print("\nGPX-Erzeugung folgt in einem späteren Ausbauschritt.")
+                output_file = generate(route_item, force=args.force)
+                print(f"  Erzeugt: {output_file}")
             return
 
 

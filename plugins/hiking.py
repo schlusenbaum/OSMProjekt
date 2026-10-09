@@ -1,7 +1,6 @@
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 PLUGIN_NAME = "hiking"
@@ -14,6 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from core.config import load_config
 from core.gpx import create_gpx, add_metadata, add_track, save_gpx
 from core.overpass import query_overpass_adaptive
+from core.routes import find_route_relations, load_route_relation
 from core.wikipedia import get_wikipedia_info
 ROUTE_CACHE = PROJECT_ROOT / "cache" / "routes"
 GPX_OUTPUT = PROJECT_ROOT / "output" / "gpx" / "routes"
@@ -68,86 +68,11 @@ def route_profile(relation: dict) -> dict:
         "name": tags.get("name"),
     }
 
-def find_hiking_routes(bbox):
-    import urllib.parse
-    import urllib.request
-
-    south, west, north, east = bbox
-
-    ROUTE_CACHE.mkdir(parents=True, exist_ok=True)
-
-    cache_name = (
-        f"hiking_"
-        f"{south:.6f}_"
-        f"{west:.6f}_"
-        f"{north:.6f}_"
-        f"{east:.6f}.json"
-    )
-    cache_path = ROUTE_CACHE / cache_name
-
-    config = load_config()
-    ttl_days = config["cache"]["hiking_routes_ttl_days"]
-    ttl_seconds = ttl_days * 24 * 60 * 60
-
-    if cache_path.exists():
-        age_seconds = time.time() - cache_path.stat().st_mtime
-
-        if age_seconds < ttl_seconds:
-            data = json.loads(
-                cache_path.read_text(encoding="utf-8")
-            )
-            print(
-                f"Hiking-Routen aus Cache geladen: "
-                f"{cache_path.name}"
-            )
-            return data["routes"]
-
-    query = f"""
-[out:json][timeout:{config["hiking"]["query_timeout"]}];
-relation
-  ["type"="route"]
-  ["route"="hiking"]
-  ({south},{west},{north},{east});
-out tags;
-"""
-
-    areas = [
-        {
-            "min_lat": south,
-            "min_lon": west,
-            "max_lat": north,
-            "max_lon": east,
-        }
-    ]
-
-    successful_groups, failed_areas = query_overpass_adaptive(
-        areas,
-        lambda min_lat, min_lon, max_lat, max_lon: f"""
-[out:json][timeout:{config["hiking"]["query_timeout"]}];
-relation
-  ["type"="route"]
-  ["route"="hiking"]
-  ({min_lat},{min_lon},{max_lat},{max_lon});
-out tags;
-""",
-    )
-
-    if failed_areas:
-        raise RuntimeError(
-            "Hiking-Routen konnten nicht von Overpass geladen werden."
-        )
-
-    data = {
-        "elements": [
-            element
-            for _, group_data in successful_groups
-            for element in group_data.get("elements", [])
-        ]
-    }
-
+def find_hiking_routes(bbox, force=False):
+    """Filtert Wanderrouten aus dem gemeinsamen Routenindex."""
     routes = []
 
-    for element in data.get("elements", []):
+    for element in find_route_relations(bbox, "hiking", force=force):
         tags = element.get("tags", {})
 
         routes.append({
@@ -169,84 +94,13 @@ out tags;
         )
     )
 
-    cache_path.write_text(
-        json.dumps(
-            {"routes": routes},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
-    print(
-        f"Hiking-Routen im Cache gespeichert: "
-        f"{cache_path.name}"
-    )
-
     return routes
 
 
 def load_relation(
     relation_id: int,
 ) -> tuple[dict, dict[int, dict], dict[int, dict]]:
-    path = ROUTE_CACHE / f"relation_{relation_id}.json"
-
-    if path.exists():
-        data = json.loads(path.read_text(encoding="utf-8"))
-    else:
-        from core.overpass import query_overpass_retry
-
-        print(
-            f"Kein Relations-Cache für {relation_id} vorhanden. "
-            f"Lade Relation von Overpass ..."
-        )
-
-        config = load_config()
-
-        query = f"""
-[out:json][timeout:{config["hiking"]["query_timeout"]}];
-relation({relation_id});
-(._;>;);
-out body;
-"""
-
-        data = query_overpass_retry(query)
-
-        ROUTE_CACHE.mkdir(parents=True, exist_ok=True)
-
-        path.write_text(
-            json.dumps(
-                data,
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-        print(
-            f"Relations-Cache gespeichert: {path.name}"
-        )
-
-    relation = next(
-        element
-        for element in data["elements"]
-        if element["type"] == "relation"
-        and element["id"] == relation_id
-    )
-
-    ways = {
-        element["id"]: element
-        for element in data["elements"]
-        if element["type"] == "way"
-    }
-
-    nodes = {
-        element["id"]: element
-        for element in data["elements"]
-        if element["type"] == "node"
-    }
-
-    return relation, ways, nodes
+    return load_route_relation(relation_id)
 
 
 def calculate_route_length_km(
@@ -2088,7 +1942,7 @@ def discover(bbox, force=False):
     """Routen für die gemeinsame Plugin-Schnittstelle entdecken."""
     from core.routes import RouteItem
 
-    routes = find_hiking_routes(bbox)
+    routes = find_hiking_routes(bbox, force=force)
 
     return [
         RouteItem(

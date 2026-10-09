@@ -191,6 +191,14 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
+def get_display_name(
+    tags: dict,
+    fallback: str | None = None,
+) -> str | None:
+    """Liefert, wenn vorhanden, den in OSM gepflegten deutschen Namen."""
+    return tags.get("name:de") or tags.get("name") or fallback
+
+
 def get_relevant_admin_levels(country_code: str) -> list[int]:
     with get_connection() as connection:
         rows = connection.execute(
@@ -429,8 +437,13 @@ def import_country(country_code: str) -> None:
     max_lat = bounds.get("maxlat")
     max_lon = bounds.get("maxlon")
 
+    country_name = get_display_name(
+        country_tags,
+        country_code.upper(),
+    )
+
     print(
-        f"{country_tags.get('name', country_code.upper())} gefunden: "
+        f"{country_name} gefunden: "
         f"(OSM {country['id']})"
     )
 
@@ -458,7 +471,7 @@ def import_country(country_code: str) -> None:
                 WHERE id = ?
                 """,
                 (
-                    country_tags.get("name", country_code.upper()),
+                    country_name,
                     min_lat,
                     min_lon,
                     max_lat,
@@ -470,7 +483,7 @@ def import_country(country_code: str) -> None:
         else:
             country_id = insert_region(
                 connection,
-                country_tags.get("name", country_code.upper()),
+                country_name,
                 "country",
                 None,
                 "relation",
@@ -553,7 +566,7 @@ foreach.districts->.district(
             continue
 
         tags = element.get("tags", {})
-        name = tags.get("name")
+        name = get_display_name(tags)
 
         if not name:
             continue
@@ -756,7 +769,7 @@ def import_children(
             continue
 
         tags = element.get("tags", {})
-        name = tags.get("name")
+        name = get_display_name(tags)
 
         if not name:
             continue
@@ -866,7 +879,7 @@ def import_children(
                 continue
 
             nested_tags = nested_element.get("tags", {})
-            nested_name = nested_tags.get("name")
+            nested_name = get_display_name(nested_tags)
             nested_admin_level = nested_tags.get("admin_level")
 
             if not nested_name or not nested_admin_level:

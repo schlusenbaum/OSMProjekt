@@ -11,6 +11,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.gpx import add_metadata, add_track, create_gpx, save_gpx
 from core.overpass import query_overpass_retry
+from core.routes import find_route_relations
 
 
 PLUGIN_NAME = "bus"
@@ -57,128 +58,21 @@ def discover_bus_lines(
     force: bool = False,
 ) -> dict:
     """
-    Buslinien innerhalb einer BBOX ermitteln.
+    Buslinien aus dem gemeinsamen Routenindex ermitteln.
 
     Die Linien werden nach ref gruppiert.
-
-    Der Discovery-Cache ist BBOX-spezifisch.
     """
-
-    BUS_CACHE.mkdir(parents=True, exist_ok=True)
-
-    discovery_cache = BUS_CACHE / _bbox_cache_name(
-        "bus_discovery",
-        bbox,
-    )
-
-    if discovery_cache.exists() and not force:
-        print()
-        print("Discovery-Cache vorhanden:")
-        print(f"  {discovery_cache}")
-        print("  Keine Overpass-Abfrage erforderlich.")
-
-        with discovery_cache.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-            lines = json.load(file)
-
-        print()
-        print(f"Buslinien gefunden: {len(lines)}")
-
-        return lines
-
-    south, west, north, east = bbox
-
-    query = f"""
-[out:json][timeout:60];
-
-relation["type"="route"]["route"="bus"](
-    {south},
-    {west},
-    {north},
-    {east}
-);
-
-out tags;
-"""
 
     print()
     print("==============================================")
     print("Buslinien suchen")
     print("==============================================")
     print()
-    print("Buslinien werden von Overpass ermittelt.")
-
-    try:
-        data = query_overpass_retry(query)
-
-    except Exception as error:
-        print()
-        print("  Overpass-Liniensuche fehlgeschlagen.")
-        print(f"  {error}")
-        print()
-        print("  Suche vorhandene OSM-JSON-Dateien ...")
-
-        lines = {}
-
-        for json_filename in sorted(
-            BUS_CACHE.glob("linie_*_osm.json")
-        ):
-            try:
-                with json_filename.open(
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-                    cached_data = json.load(file)
-
-            except Exception as cache_error:
-                print(
-                    f"  WARNUNG: {json_filename} "
-                    f"konnte nicht gelesen werden: {cache_error}"
-                )
-                continue
-
-            for element in cached_data.get("elements", []):
-                if element.get("type") != "relation":
-                    continue
-
-                relation_id = element.get("id")
-                tags = element.get("tags", {})
-                ref = tags.get("ref")
-
-                if relation_id is None or not ref:
-                    continue
-
-                ref = ref.strip()
-
-                if not ref:
-                    continue
-
-                lines.setdefault(ref, []).append(
-                    {
-                        "id": relation_id,
-                        "tags": tags,
-                    }
-                )
-
-        if not lines:
-            raise
-
-        print()
-        print(
-            f"  Aus vorhandenen OSM-JSON-Dateien "
-            f"gefunden: {len(lines)} Buslinien"
-        )
-
-        return lines
+    print("Buslinien werden aus dem gemeinsamen Routenindex ermittelt.")
 
     lines = {}
 
-    for element in data.get("elements", []):
-        if element.get("type") != "relation":
-            continue
-
+    for element in find_route_relations(bbox, "bus", force=force):
         relation_id = element.get("id")
         tags = element.get("tags", {})
 
@@ -198,21 +92,6 @@ out tags;
                 "tags": tags,
             }
         )
-
-    with discovery_cache.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            lines,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    print()
-    print("Discovery-Cache gespeichert:")
-    print(f"  {discovery_cache}")
 
     print()
     print(f"Buslinien gefunden: {len(lines)}")
